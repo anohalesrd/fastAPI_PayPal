@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <title>Test PayPal FastAPI</title>
+    <script src="https://www.paypal.com/sdk/js?client-id=AQ499KwXbuP7bo80zDvnjOE4atoIa71bH7wPZEKYryJSFiuOGzAcjDuQlNa3zvRBFn1LPKMoEnWgWFmn&currency=USD"></script>
+</head>
+<body>
+
+<h2>Choose the best option for you</h2>
+
+<div id="paypal-button-container"></div>
+
+<button id="refundBtn" style="display:none;">Refund</button>
+
+<div id="message"></div>
+
+<script>
+    let lastTransactionId = null;
+
+    paypal.Buttons({
+        createOrder: function(data, actions) {
+            return fetch('/create-order', { method: 'POST' })
+                .then(response => response.json())
+                .then(order => order.id);
+        },
+        onApprove: function(data, actions) {
+            return fetch(`/capture-order/${data.orderID}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(details => {
+                    const transactionId = details.transaction_id;
+                    const status = details.status;
+                    lastTransactionId = transactionId;
+
+                    document.getElementById('message').innerHTML = `
+                    <strong>Pago capturado</strong><br>
+                    ID de transacción: ${transactionId}<br>
+                    Estado: ${status}`;
+                    console.log('Transaction ID:', transactionId);
+                    console.log('Status: ', status)
+                    document.getElementById('refundBtn').style.display = 'inline-block';
+                    
+                });
+        }
+    }).render('#paypal-button-container');
+
+ document.getElementById('refundBtn').addEventListener('click', () => {
+        if (!lastTransactionId) {
+            alert("No refund operation available");
+            return;
+        }
+
+        fetch(`/refund-transaction/${lastTransactionId}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('message').innerText = `Refund completed.\nRefund ID: ${data.refund_id}\nStatus: ${data.refund_status}`;
+                console.log("Refund response:", data);
+                document.getElementById('refundBtn').style.display = 'none';
+                lastTransactionId = null;
+            })
+            .catch(err => {
+                alert('Refund Error');
+                console.error(err);
+            });
+    });
+</script>
+</body>
+</html>
