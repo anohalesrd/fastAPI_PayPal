@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Processing Subscription</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    background: #f9f9f9;
+    color: #333;
+  }
+  #loading-text {
+    font-size: 18px;
+    margin-bottom: 20px;
+  }
+  .spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #0070ba;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg);}
+    100% { transform: rotate(360deg);}
+  }
+  p.error {
+    color: red;
+  }
+</style>
+</head>
+<body>
+<div id="loading-text">Starting process...</div>
+<div class="spinner"></div>
+
+<script>
+  const updateText = (text, isError = false) => {
+      const loadingText = document.getElementById("loading-text");
+      loadingText.textContent = text;
+      loadingText.className = isError ? 'error' : '';
+  };
+
+  fetch("/create-product", { method: "POST" })
+      .then(res => res.json())
+      .then(productData => {
+          updateText("Creating plan...");
+          return fetch(`/create-plan?product_id=${productData.id}`, { method: "POST" });
+      })
+      .then(res => res.json())
+      .then(planData => {
+          updateText("Activating plan...");
+          return fetch(`/activate-plan?plan_id=${planData.id}`, { method: "POST" })
+              .then(response => {
+                  if (!response.ok) throw new Error("Could not activate the plan");
+                  return planData.id;
+              });
+      })
+      .then(planId => {
+          updateText("Creating subscription...");
+          return fetch(`/create-subscription?plan_id=${planId}`, { method: "POST" });
+      })
+      .then(res => res.json())
+      .then(subscriptionData => {
+          const approvalLink = subscriptionData.approve_link || subscriptionData.links?.find(link => link.rel === "approve")?.href;
+          if (approvalLink) {
+              updateText("Redirecting to PayPal approval...");
+              window.location.href = approvalLink;
+          } else {
+              updateText("Could not get approval link.", true);
+          }
+      })
+      .catch(error => {
+          updateText(`Error: ${error.message}`, true);
+          console.error(error);
+      });
+</script>
+</body>
+</html>

@@ -4,113 +4,267 @@
     <meta charset="UTF-8" />
     <title>Test PayPal FastAPI</title>
     <script src="https://www.paypal.com/sdk/js?client-id=AQ499KwXbuP7bo80zDvnjOE4atoIa71bH7wPZEKYryJSFiuOGzAcjDuQlNa3zvRBFn1LPKMoEnWgWFmn&currency=USD"></script>
+   
+  <style>
+    body, html {
+      height: 100%;
+      margin: 0;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background-color: #ffffff;
+    }
+
+    .button-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+
+    h2 {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 20px;
+      font-weight: bold;
+      color: #2c2e2f;
+      margin-bottom: 24px;
+    }
+
+    /* Contenedor de botones de PayPal y sus similares */
+    .paypal-button-wrapper,
+    #subscribeBtn {
+      width: 320px;
+      max-width: 100%;
+      margin-bottom: 14px;
+    }
+
+    #subscribeBtn {
+      background-color: #ffc439;
+      color: #111;
+      border: none;
+      padding: 12px 0;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #subscribeBtn img {
+      height: 18px;
+      margin-left: 8px;
+    }
+
+    #subscribeBtn:hover {
+      background-color: #e0ac00;
+    }
+
+    /* Modal styles */
+    #paypalModal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0; top: 0;
+      width: 100vw; height: 100vh;
+      background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .paypal-modal-content {
+      background-color: #fff;
+      margin: 10% auto;
+      padding: 24px;
+      border-radius: 12px;
+      width: 400px;
+      max-width: 90%;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      text-align: center;
+      position: relative;
+    }
+
+    .paypal-modal-header {
+      color: #28a745; /* verde */
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .checkmark {
+      font-size: 28px;
+    }
+
+    .paypal-modal-body {
+      color: #2c2e2f;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .paypal-modal-close {
+      position: absolute;
+      top: 10px; right: 12px;
+      font-size: 18px;
+      color: #666;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .paypal-modal-close:hover {
+      color: #000;
+    }
+
+    /* Refund button inside modal */
+    #refundBtn {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-weight: bold;
+      cursor: pointer;
+      background-color: #dc3545; /* rojo */
+      color: white;
+      border: none;
+      border-radius: 5px;
+      display: none; /* oculto inicialmente */
+      transition: background-color 0.3s ease;
+    }
+    #refundBtn:hover {
+      background-color: #b02a37;
+    }
+
+    /* OK button */
+    .paypal-modal-button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-weight: bold;
+      cursor: pointer;
+      background-color: #0070ba; /* azul PayPal */
+      color: white;
+      border: none;
+      border-radius: 5px;
+      transition: background-color 0.3s ease;
+    }
+    .paypal-modal-button:hover {
+      background-color: #004d80;
+    }
+  h2 {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: bold;
+    color: #003087;
+    font-size: 24px;
+    margin-bottom: 24px;
+  }
+</style>
 </head>
+
 <body>
 
-<h2>Choose the best option for you</h2>
+<div id="paypalModal">
+  <div class="paypal-modal-content">
+    <span class="paypal-modal-close" onclick="closePaypalModal()">&times;</span>
+    <div class="paypal-modal-header" id="modalHeader"><span class="checkmark">✔</span> Payment Captured</div>
+    <div class="paypal-modal-body" id="paypalModalContent">
+      <!-- Info dinámica aquí -->
+    </div>
+    <button id="refundBtn">Refund</button>
+    <button class="paypal-modal-button" onclick="closePaypalModal()">OK</button>
+  </div>
+</div>
 
-<div id="paypal-button-container"></div>
+<div class="button-container">
+    <h2>Select a Payment Method</h2>
 
-<button id="refundBtn" style="display:none;">Refund</button>
-<button id="subscribeBtn">Subscribe</button>
-
-<div id="message"></div>
+    <div id="paypal-button-container"></div>
+    
+    <button id="subscribeBtn">
+      Subscription Method by 
+      <img src="https://www.paypalobjects.com/webstatic/icon/pp258.png" alt="PayPal" />
+    </button>
+</div>
 
 <script>
-    let lastTransactionId = null;
+  let lastTransactionId = null;
 
-    paypal.Buttons({
-        createOrder: function(data, actions) {
-            return fetch('/create-order', { method: 'POST' })
-                .then(response => response.json())
-                .then(order => order.id);
-        },
-        onApprove: function(data, actions) {
-            return fetch(`/capture-order/${data.orderID}`, { method: 'POST' })
-                .then(response => response.json())
-                .then(details => {
-                    const transactionId = details.transaction_id;
-                    const status = details.status;
-                    lastTransactionId = transactionId;
+  function openInfoPopup(content, isRefund = false) {
+    const header = document.getElementById('modalHeader');
+    if(isRefund) {
+      header.innerHTML = '<span class="checkmark">✔</span> Refund Completed';
+      header.style.color = '#007bff'; // azul para refund
+    } else {
+      header.innerHTML = '<span class="checkmark">✔</span> Payment Captured';
+      header.style.color = '#28a745'; // verde para pago
+    }
+    document.getElementById('paypalModalContent').innerHTML = content;
+    document.getElementById('paypalModal').style.display = 'block';
 
-                    document.getElementById('message').innerHTML = `
-                    <strong>Payment captured</strong><br>
-                    Transaction ID: ${transactionId}<br>
-                    Status: ${status}`;
-                    document.getElementById('refundBtn').style.display = 'inline-block';
-                });
-        }
-    }).render('#paypal-button-container');
+    // Mostrar botón refund solo si NO es popup de refund
+    document.getElementById('refundBtn').style.display = isRefund ? 'none' : 'inline-block';
+  }
 
-    document.getElementById('refundBtn').addEventListener('click', () => {
-        if (!lastTransactionId) {
-            alert("No refund operation available");
-            return;
-        }
+  function closePaypalModal() {
+    document.getElementById('paypalModal').style.display = 'none';
+  }
 
-        fetch(`/refund-transaction/${lastTransactionId}`, { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('message').innerText = `Refund completed.\nRefund ID: ${data.refund_id}\nStatus: ${data.refund_status}`;
-                document.getElementById('refundBtn').style.display = 'none';
-                lastTransactionId = null;
-            })
-            .catch(err => {
-                alert('Refund Error');
-                console.error(err);
-            });
-    });
+  paypal.Buttons({
+    createOrder: function(data, actions) {
+      return fetch('/create-order', { method: 'POST' })
+        .then(response => response.json())
+        .then(order => order.id);
+    },
+    onApprove: function(data, actions) {
+      return fetch(`/capture-order/${data.orderID}`, { method: 'POST' })
+        .then(response => response.json())
+        .then(details => {
+          const transactionId = details.transaction_id;
+          const status = details.status;
+          lastTransactionId = transactionId;
 
-    const popupWidth = 600;
-    const popupHeight = 600;
+          const message = `
+            <p><strong>Transaction ID:</strong> ${transactionId}</p>
+            <p><strong>Status:</strong> ${status}</p>
+          `;
+          openInfoPopup(message);
+        });
+    }
+  }).render('#paypal-button-container');
 
-    document.getElementById("subscribeBtn").addEventListener("click", () => {
-        const left = (window.screen.width / 2) - (popupWidth / 2);
-        const top = (window.screen.height / 2) - (popupHeight / 2);
-        const popup = window.open("", "paypal_subscribe_popup",
-            `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=no,scrollbars=no`);
+  // Botón refund
+  document.getElementById('refundBtn').addEventListener('click', () => {
+    if (!lastTransactionId) {
+      alert("No refund operation available");
+      return;
+    }
 
-        if (!popup) {
-            alert("Please allow popups for this site.");
-            return;
-        }
+    fetch(`/refund-transaction/${lastTransactionId}`, { method: 'POST' })
+      .then(response => response.json())
+      .then(data => {
+        // Mostrar popup refund
+        const refundMessage = `
+          <p><strong>Refund ID:</strong> ${data.refund_id}</p>
+          <p><strong>Status:</strong> ${data.refund_status}</p>
+        `;
+        openInfoPopup(refundMessage, true);
 
-        popup.document.body.innerHTML = "<p>Creating product...</p>";
+        // Resetear estado
+        lastTransactionId = null;
+      })
+      .catch(err => {
+        alert('Refund Error');
+        console.error(err);
+      });
+  });
 
-        fetch("/create-product", { method: "POST" })
-            .then(res => res.json())
-            .then(productData => {
-                popup.document.body.innerHTML = "<p>Creating plan...</p>";
-                const productId = productData.id;
-                return fetch(`/create-plan?product_id=${productId}`, { method: "POST" });
-            })
-            .then(res => res.json())
-            .then(planData => {
-                popup.document.body.innerHTML = "<p>Activating plan...</p>";
-                const planId = planData.id;
-                return fetch(`/activate-plan?plan_id=${planId}`, { method: "POST" })
-                    .then(response => {
-                        if (!response.ok) throw new Error("Could not activate the plan");
-                        return planId;
-                    });
-            })
-            .then(planId => {
-                popup.document.body.innerHTML = "<p>Creating subscription...</p>";
-                return fetch(`/create-subscription?plan_id=${planId}`, { method: "POST" });
-            })
-            .then(res => res.json())
-            .then(subscriptionData => {
-                const approvalLink = subscriptionData.approve_link || subscriptionData.links?.find(link => link.rel === "approve")?.href;
-                if (approvalLink) {
-                    popup.location.href = approvalLink;
-                } else {
-                    popup.document.body.innerHTML = "<p style='color:red;'>Could not get approval link.</p>";
-                }
-            })
-            .catch(error => {
-                popup.document.body.innerHTML = `<p style="color:red;">Error: ${error.message}</p>`;
-            });
-    });
+  document.getElementById("subscribeBtn").addEventListener("click", () => {
+    const popupWidth = 700;
+    const popupHeight = 700;
+    const left = (window.screen.width / 2) - (popupWidth / 2);
+    const top = (window.screen.height / 2) - (popupHeight / 2);
+    window.open("/processing_subs.html", "paypal_subscribe_popup",
+                `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=no,scrollbars=no`);
+  });
 </script>
 
 </body>

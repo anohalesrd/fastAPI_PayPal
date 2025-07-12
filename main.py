@@ -9,39 +9,38 @@ from dotenv import load_dotenv
 import base64
 from fastapi.responses import HTMLResponse
 
-'''
-load credential from file .env
-'''
+
+# load credential from file .env
 load_dotenv()
 
-'''
-create class app from FastAPI
-'''
-
+# create class app from FastAPI
 app = FastAPI()
 
+
+# enviroment varibales
 PAYPAL_CLIENT_ID = os.getenv("CLIENT_ID")
 PAYPAL_SECRET = os.getenv("CLIENT_SECRET")
 
 '''
 get access token from PayPal and endpoint for manage payments orders
-
 docs: https://developer.paypal.com/api/rest/authentication/
 '''
-
 PAYPAL_OAUTH_URL = "https://api-m.sandbox.paypal.com/v1/oauth2/token"
 PAYPAL_ORDER_URL = "https://api-m.sandbox.paypal.com/v2/checkout/orders"
 
-'''
-send index.html to browser
-'''
+
+# send index.html to browser to show event buttons
 @app.get("/")
 def template():
     return FileResponse('index.html')
 
-
 def get_token():
+    '''
+    Obtain an OAuth 2.0 access token to interact with PayPal API
+    docs: https://developer.paypal.com/api/rest/authentication/#client-credentials-grant
 
+    **Encode CLIENT_ID:CLIENT_SECRET in Base64 before sending it in the API call
+    '''
     auth = base64.b64encode(f"{PAYPAL_CLIENT_ID}:{PAYPAL_SECRET}".encode()).decode()
 
     headers = {
@@ -55,38 +54,25 @@ def get_token():
 
     response = requests.post(PAYPAL_OAUTH_URL, headers=headers, data=data)
 
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())
+    print('*************************************')
+
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="Error obteniendo token de PayPal")
+        raise HTTPException(status_code=500, detail="Error getting PayPal access token")
     
     token = response.json().get("access_token")
-
     return token
 
 
 def create_order(token: str):
     '''
+    Create a PayPal order with intent to capture payment immediately
+    Intent is set to "CAPTURE" which means the payment will be captured immediately
+
     docs: https://developer.paypal.com/docs/api/orders/v2/#orders_create
-    Creates an order. Merchants and partners can add Level 2 and 3 data to payments to reduce risk and payment processing costs
-
-    Function args:
-        'token': access token getted in get_token function
-    
-    Required parameters: 
-        - purchase_units: An array of purchase units. Each purchase unit establishes a contract between a payer and the payee
-        - intent: capture payment immediately or authorize a payment for an order after order creation (CAPTURE, AUTHORIZE)
-
-    Responses:
-        - 200 SUCCESSFUL > A successful response to an idempotent request returns the HTTP 200 OK status code with a JSON response body that shows order details.
-
-        - 201 SUCCESSFUL > A successful request returns the HTTP 201 Created status code 
-          and a JSON response body that includes by default a minimal response with the ID, status, and HATEOAS links
-
-        - 400 FAILED > Request is not well-formed, syntactically incorrect, or violates schema.
-
-        - 422 FAILED > The requested action could not be performed, semantically incorrect, or failed business validation.
-
     '''
-
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}"
@@ -104,7 +90,12 @@ def create_order(token: str):
         ]
     }
 
-    response = requests.post(PAYPAL_ORDER_URL, json=data, headers=headers)
+    response = requests.post(PAYPAL_ORDER_URL,headers=headers, json=data)
+
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())
+    print('*************************************')
 
     if response.status_code in (200,201):
         print('Payment Order Created: ', response.json())
@@ -119,16 +110,37 @@ request to create-order endpoint and returns an Order ID
 '''
 @app.post('/create-order')
 def create_paypal_order():
+    '''
+    Create a PayPal payment order.
+    This endpoint get access token from PayPal, then create payment order with intent to 
+    capture payment inmediately
+
+    Returns:
+              {
+                  "id": "<order_id>"
+              }
+    docs: https://developer.paypal.com/docs/api/orders/v2/#orders_create
+    '''
     token = get_token()
     order_id = create_order(token)
     return {'id': order_id}
 
-'''
-request to capture-order endpoint, the backend capture the payment
-'''
 @app.post("/capture-order/{order_id}")
 def capture_order(order_id: str):
+    '''
+        Capture a PayPal payment for a given order Id
 
+            Args:
+            order_id (str): The PayPal order ID to capture payment for.
+
+        Returns:
+                {
+                    "transaction_id": "<capture_transaction_id>",
+                    "status": "<capture_status>"
+                }
+        
+        docs: https://developer.paypal.com/docs/api/orders/v2/#orders_capture
+    '''
     token = get_token()
 
     headers = {
@@ -139,6 +151,11 @@ def capture_order(order_id: str):
     url = f'{PAYPAL_ORDER_URL}/{order_id}/capture'
 
     response = requests.post(url, headers=headers)
+
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())
+    print('*************************************')
 
     if response.status_code in (200, 201):
         print('Payment Captured', response.json())
@@ -154,6 +171,21 @@ def capture_order(order_id: str):
 
 @app.post('/refund-transaction/{capture_id}')
 def refund(capture_id: str):
+    '''
+    Process a refund for a completed PayPal capture transaction
+
+    Args:
+        capture_id (str): The PayPal capture transaction ID to refund.
+
+    Returns:
+              {
+                  "message": "Refund completed",
+                  "refund_id": "refund_transaction_id",
+                  "refund_status": "refund_status"
+              }
+    
+    docs: https://developer.paypal.com/docs/api/payments/captures/#captures_refund
+    '''
     token = get_token()
 
     headers = {
@@ -165,6 +197,11 @@ def refund(capture_id: str):
 
     response = requests.post(url, headers=headers)
 
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())
+    print('*************************************')
+
     if response.status_code in (200, 201):
         refund_data = response.json()
         refund_id = refund_data['id']
@@ -173,9 +210,18 @@ def refund(capture_id: str):
     else:
         raise HTTPException(status_code=response.status_code, detail="Refund failed")
 
-
 @app.post('/create-product')
 def create_product():
+    '''
+    
+    Create a new product in the PayPal catalog with predefined details such as name, description,
+    type, and category in the PayPal environment.
+
+    Returns:
+        dict: The JSON response from PayPal with the created product details.
+    
+    docs: https://developer.paypal.com/docs/api/catalog-products/v1/#products_create
+    '''
     token = get_token()
 
     headers = {
@@ -202,6 +248,17 @@ def create_product():
 
 @app.post('/create-plan')
 def create_plan(product_id: str):
+    '''
+    Create a billing plan for a given product in PayPal
+
+    Args:
+        product_id (str): The PayPal product ID to associate with the plan.
+
+    Returns:
+        dict: Plan details including plan ID, name, billing interval, price value, and currency.
+    
+    docs: https://developer.paypal.com/docs/api/subscriptions/v1/#plans_create
+    '''
     token = get_token()
 
     headers= {
@@ -241,12 +298,13 @@ def create_plan(product_id: str):
     url = "https://api-m.sandbox.paypal.com/v1/billing/plans"
 
     response = requests.post(url, headers=headers, json=data)
-    '''
+
+
     print('*************************************')
     print("Status code:", response.status_code)
     print("Response JSON:", response.json())
     print('*************************************')
-    '''
+
 
     if response.status_code in (200, 201):
         print('Plan Created Successfully')
@@ -255,6 +313,11 @@ def create_plan(product_id: str):
         plan_id = returned_data['id']
         url_get_plan = f"https://api-m.sandbox.paypal.com/v1/billing/plans/{plan_id}"
         response_plan = requests.get(url_get_plan, headers=headers)
+
+        print('*************************************')
+        print("Status code:", response.status_code)
+        print("Response JSON:", response_plan.json())
+        print('*************************************')
 
         if response_plan.status_code == 200:
             plan = response_plan.json()
@@ -283,6 +346,20 @@ def create_plan(product_id: str):
 
 @app.post('/activate-plan')
 def activate_plan(plan_id: str):
+    '''
+    Activate a PayPal billing plan given the plan id
+
+    Args:
+        plan_id (str): The PayPal billing plan ID to activate.
+
+    Returns:
+        dict: A message indicating the activation result.
+    
+    docs: https://developer.paypal.com/docs/api/subscriptions/v1/#plans_activate
+
+    By default, the plan is activated at the moment of creating it but we create
+    this endpoint for more flexibility to the API consumer
+    '''
     token = get_token()
 
     headers = {"Authorization": f'Bearer {token}',
@@ -293,6 +370,11 @@ def activate_plan(plan_id: str):
 
     get_url = f"https://api-m.sandbox.paypal.com/v1/billing/plans/{plan_id}"
     get_response = requests.get(get_url, headers=headers)
+
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", get_response.json())
+    print('*************************************')
 
     if get_response.status_code != 200:
         raise Exception('Error getting plan', get_response.status_code)
@@ -307,6 +389,11 @@ def activate_plan(plan_id: str):
 
     response = requests.post(url, headers=headers, data="{}")
 
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())
+    print('*************************************')
+
     if response.status_code == 204:
         print(f'Plan {plan_id} activate successfully')
     else:
@@ -314,6 +401,17 @@ def activate_plan(plan_id: str):
     
 @app.post('/create-subscription')
 def create_suscription(plan_id: str):
+    '''
+    Create a new PayPal subscription for a given billing plan
+
+    Args:
+        plan_id (str): The PayPal billing plan ID to associate with the subscription.
+
+    Returns:
+        dict: Contains subscription ID, status, approval link, and cancel link send to the frontend
+
+    docs: https://developer.paypal.com/docs/api/subscriptions/v1/#subscriptions_create
+    '''
     token = get_token()
 
     headers = {"Authorization": f"Bearer {token}",
@@ -340,7 +438,7 @@ def create_suscription(plan_id: str):
 
     response = requests.post(url, headers=headers, json=data)
 
-    
+
     print('*************************************')
     print("Status code:", response.status_code)
     print("Response JSON:", response.json())    
@@ -372,6 +470,22 @@ def create_suscription(plan_id: str):
 
 @app.get('/success', response_class = HTMLResponse)
 def return_url(request: Request):
+    '''
+    Handle PayPal subscription approval redirect in frontend
+
+   Args:
+        request (Request): FastAPI Request object containing query parameters from PayPal:
+            - subscription_id (str): Id of the approved subscription.
+
+    Returns:
+        HTMLResponse: A confirmation web page with subscription success message.
+
+    Notes:
+        - This page includes a visual confirmation and auto-closes after a few seconds.
+        - This endpoint does not verify the subscription; it only displays a message based on the redirect.
+    
+    docs: https://developer.paypal.com/docs/subscriptions/integrate/#4-get-the-transaction-details
+    '''
     subscription_id = request.query_params.get('subscription_id')
     ba_token = request.query_params.get("ba_token")
     token = request.query_params.get("token")
@@ -384,29 +498,54 @@ def return_url(request: Request):
         <title>Subscription Successful</title>
         <style>
             body {{
-                background-color: #f9f9f9;
-                font-family: Arial, sans-serif;
-                text-align: center;
-                padding-top: 50px;
+                background-color: #f2f4f7;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
             }}
-            .check {{
-                font-size: 80px;
-                color: #4CAF50;
+            .checkmark-circle {{
+                width: 100px;
+                height: 100px;
+                border-radius: 50%;
+                background: #28a745;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                animation: pop 0.5s ease-out;
+            }}
+            .checkmark {{
+                color: white;
+                font-size: 60px;
             }}
             .message {{
-                font-size: 24px;
-                margin-top: 20px;
+                font-size: 26px;
                 color: #333;
+                margin-top: 20px;
+                font-weight: 600;
             }}
             .sub-id {{
                 margin-top: 10px;
                 font-size: 18px;
-                color: #777;
+                color: #555;
             }}
             .close-note {{
                 margin-top: 30px;
                 font-size: 14px;
-                color: #aaa;
+                color: #999;
+            }}
+            @keyframes pop {{
+                0% {{
+                    transform: scale(0);
+                    opacity: 0;
+                }}
+                100% {{
+                    transform: scale(1);
+                    opacity: 1;
+                }}
             }}
         </style>
         <script>
@@ -416,7 +555,9 @@ def return_url(request: Request):
         </script>
     </head>
     <body>
-        <div class="check">✔️</div>
+        <div class="checkmark-circle">
+            <div class="checkmark">&#10004;</div>
+        </div>
         <div class="message">¡You are subscribed!</div>
         <div class="sub-id">Subscription ID: <strong>{subscription_id}</strong></div>
         <div class="close-note">This window will close automatically.</div>
@@ -424,3 +565,19 @@ def return_url(request: Request):
     </html>
     """
     return HTMLResponse(content=html_content)
+
+@app.get("/processing_subs.html", response_class=HTMLResponse)
+def processing():
+    '''
+    Show the subscription processing HTML page
+
+    Returns:
+        HTMLResponse: The raw HTML content of `processing_subs.html`.
+
+    Notes:
+        - Ensure that `processing_subs.html` exists in the root directory or provide the correct path.
+        - This page is static and does not interact with any backend logic or API.
+    '''
+    with open('processing_subs.html', 'r', encoding='utf-8') as f:
+        html_content = f.read()
+        return HTMLResponse(content=html_content)
