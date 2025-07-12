@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8" />
     <title>Test PayPal FastAPI</title>
@@ -12,6 +12,7 @@
 <div id="paypal-button-container"></div>
 
 <button id="refundBtn" style="display:none;">Refund</button>
+<button id="subscribeBtn">Subscribe</button>
 
 <div id="message"></div>
 
@@ -33,18 +34,15 @@
                     lastTransactionId = transactionId;
 
                     document.getElementById('message').innerHTML = `
-                    <strong>Pago capturado</strong><br>
-                    ID de transacción: ${transactionId}<br>
-                    Estado: ${status}`;
-                    console.log('Transaction ID:', transactionId);
-                    console.log('Status: ', status)
+                    <strong>Payment captured</strong><br>
+                    Transaction ID: ${transactionId}<br>
+                    Status: ${status}`;
                     document.getElementById('refundBtn').style.display = 'inline-block';
-                    
                 });
         }
     }).render('#paypal-button-container');
 
- document.getElementById('refundBtn').addEventListener('click', () => {
+    document.getElementById('refundBtn').addEventListener('click', () => {
         if (!lastTransactionId) {
             alert("No refund operation available");
             return;
@@ -54,7 +52,6 @@
             .then(response => response.json())
             .then(data => {
                 document.getElementById('message').innerText = `Refund completed.\nRefund ID: ${data.refund_id}\nStatus: ${data.refund_status}`;
-                console.log("Refund response:", data);
                 document.getElementById('refundBtn').style.display = 'none';
                 lastTransactionId = null;
             })
@@ -63,6 +60,58 @@
                 console.error(err);
             });
     });
+
+    const popupWidth = 600;
+    const popupHeight = 600;
+
+    document.getElementById("subscribeBtn").addEventListener("click", () => {
+        const left = (window.screen.width / 2) - (popupWidth / 2);
+        const top = (window.screen.height / 2) - (popupHeight / 2);
+        const popup = window.open("", "paypal_subscribe_popup",
+            `width=${popupWidth},height=${popupHeight},left=${left},top=${top},resizable=no,scrollbars=no`);
+
+        if (!popup) {
+            alert("Please allow popups for this site.");
+            return;
+        }
+
+        popup.document.body.innerHTML = "<p>Creating product...</p>";
+
+        fetch("/create-product", { method: "POST" })
+            .then(res => res.json())
+            .then(productData => {
+                popup.document.body.innerHTML = "<p>Creating plan...</p>";
+                const productId = productData.id;
+                return fetch(`/create-plan?product_id=${productId}`, { method: "POST" });
+            })
+            .then(res => res.json())
+            .then(planData => {
+                popup.document.body.innerHTML = "<p>Activating plan...</p>";
+                const planId = planData.id;
+                return fetch(`/activate-plan?plan_id=${planId}`, { method: "POST" })
+                    .then(response => {
+                        if (!response.ok) throw new Error("Could not activate the plan");
+                        return planId;
+                    });
+            })
+            .then(planId => {
+                popup.document.body.innerHTML = "<p>Creating subscription...</p>";
+                return fetch(`/create-subscription?plan_id=${planId}`, { method: "POST" });
+            })
+            .then(res => res.json())
+            .then(subscriptionData => {
+                const approvalLink = subscriptionData.approve_link || subscriptionData.links?.find(link => link.rel === "approve")?.href;
+                if (approvalLink) {
+                    popup.location.href = approvalLink;
+                } else {
+                    popup.document.body.innerHTML = "<p style='color:red;'>Could not get approval link.</p>";
+                }
+            })
+            .catch(error => {
+                popup.document.body.innerHTML = `<p style="color:red;">Error: ${error.message}</p>`;
+            });
+    });
 </script>
+
 </body>
 </html>

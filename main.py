@@ -1,10 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import logging
+import json
 import requests
 import os
 from dotenv import load_dotenv
 import base64
+from fastapi.responses import HTMLResponse
 
 '''
 load credential from file .env
@@ -170,13 +173,254 @@ def refund(capture_id: str):
     else:
         raise HTTPException(status_code=response.status_code, detail="Refund failed")
 
-if __name__ == "__main__":
+
+@app.post('/create-product')
+def create_product():
     token = get_token()
-    print("Access token:", token)
 
-    order_id = create_order(token)
-    print("Order id:", order_id)
+    headers = {
+        "Authorization": f'Bearer {token}',
+        "Content-Type": "application/json"
+    }
 
-    transaction_id = capture_order(order_id)
-    print('Transaction Id: ', transaction_id)
+    data = {
+        "name": "Test product",
+        "description": "Test monthly suscription",
+        "type": "SERVICE",
+        "category": "SOFTWARE"
+    }
 
+    url = "https://api-m.sandbox.paypal.com/v1/catalogs/products"
+
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code in (200,201):
+        print('Product created successfully')
+        return response.json()
+    else:
+        raise Exception('Error: ', response.status_code)
+
+@app.post('/create-plan')
+def create_plan(product_id: str):
+    token = get_token()
+
+    headers= {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "product_id": product_id,
+        "name": "Monthly Plan",
+        "billing_cycles": [{
+            "frequency": {
+                "interval_unit": "MONTH",
+                "interval_count": 1
+            },
+            "tenure_type": "REGULAR",
+            "sequence": 1,
+            "total_cycles": 0,
+            "pricing_scheme": {
+                "fixed_price": {
+                    "value": "10",
+                    "currency_code": "USD"
+                }
+            }
+        }],
+        "payment_preferences": {
+            "auto_bill_outstanding": True,
+            "setup_fee": {
+                "value": "0",
+                "currency_code": "USD"
+            },
+            "setup_fee_failure_action": "CONTINUE",
+            "payment_failure_threshold": 3
+        }
+    }
+
+    url = "https://api-m.sandbox.paypal.com/v1/billing/plans"
+
+    response = requests.post(url, headers=headers, json=data)
+    '''
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())
+    print('*************************************')
+    '''
+
+    if response.status_code in (200, 201):
+        print('Plan Created Successfully')
+        returned_data = response.json()
+
+        plan_id = returned_data['id']
+        url_get_plan = f"https://api-m.sandbox.paypal.com/v1/billing/plans/{plan_id}"
+        response_plan = requests.get(url_get_plan, headers=headers)
+
+        if response_plan.status_code == 200:
+            plan = response_plan.json()
+
+            interval_unit = plan['billing_cycles'][0]['frequency']['interval_unit']
+            value = plan['billing_cycles'][0]['pricing_scheme']['fixed_price']['value']
+            currency_code = plan['billing_cycles'][0]['pricing_scheme']['fixed_price']['currency_code']
+
+            return {
+                "id": plan['id'],
+                "name": plan['name'],
+                "interval_unit": interval_unit,
+                "value": value,
+                "currency_code": currency_code
+            }
+        else:
+            raise Exception('Error fetching plan details', {
+                "Error": response_plan.status_code,
+                "Data": response_plan.text
+            })
+    else:
+        raise Exception('Error creating plan', {
+            "Error": response.status_code,
+            "Data": response.text
+        })
+
+@app.post('/activate-plan')
+def activate_plan(plan_id: str):
+    token = get_token()
+
+    headers = {"Authorization": f'Bearer {token}',
+               "Content-Type": "application/json",
+               "Accept": "application/json"}
+
+    url = f"https://api-m.sandbox.paypal.com/v1/billing/plans/{plan_id}/activate"
+
+    get_url = f"https://api-m.sandbox.paypal.com/v1/billing/plans/{plan_id}"
+    get_response = requests.get(get_url, headers=headers)
+
+    if get_response.status_code != 200:
+        raise Exception('Error getting plan', get_response.status_code)
+    
+    plan_status = get_response.json().get('status')
+
+    if plan_status =='ACTIVE':
+        return {'message': "Plan is already active."}
+
+    if plan_status not in ("CREATED","INACTIVE"):
+        raise Exception("Error Status Invalid", plan_status)
+
+    response = requests.post(url, headers=headers, data="{}")
+
+    if response.status_code == 204:
+        print(f'Plan {plan_id} activate successfully')
+    else:
+        raise Exception('Error: ', response.status_code, response.text)
+    
+@app.post('/create-subscription')
+def create_suscription(plan_id: str):
+    token = get_token()
+
+    headers = {"Authorization": f"Bearer {token}",
+               "Content-Type": "application/json"
+               }
+    
+    data = {"plan_id": plan_id,
+            "subscriber": {
+                "name": {
+                    "given_name": "John",
+                    "surname": "Doe"
+                },
+                "email_address": "customer@example.com"
+            },
+            "application_context": {
+                "brand_name": "Company Happy Friends",
+                "locale": "es-ES",
+                "return_url": "http://localhost:8000/success",
+                "cancel_url": "http://localhost:8000/cancel"
+                }
+            }
+    
+    url = "https://api-m.sandbox.paypal.com/v1/billing/subscriptions"
+
+    response = requests.post(url, headers=headers, json=data)
+
+    
+    print('*************************************')
+    print("Status code:", response.status_code)
+    print("Response JSON:", response.json())    
+    print('*************************************')
+
+    if response.status_code in (200,201):
+        print('Suscription Created Successfully')
+        returned_data = response.json()
+
+        links = returned_data.get("links", [])
+        approve_link = None
+        cancel_link = None
+
+        for link in links:
+            if link.get("rel") == "approve":
+                approve_link = link.get("href")
+            elif link.get('rel') == "cancel":
+                cancel_link = link.get("href")
+
+        if approve_link:
+            return {
+                "id": returned_data['id'],
+                "status": returned_data['status'],
+                "approve_link": approve_link,
+                "cancel_link": cancel_link
+            }
+    else:
+        raise Exception('Error: ', response.status_code, response.text)
+
+@app.get('/success', response_class = HTMLResponse)
+def return_url(request: Request):
+    subscription_id = request.query_params.get('subscription_id')
+    ba_token = request.query_params.get("ba_token")
+    token = request.query_params.get("token")
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Subscription Successful</title>
+        <style>
+            body {{
+                background-color: #f9f9f9;
+                font-family: Arial, sans-serif;
+                text-align: center;
+                padding-top: 50px;
+            }}
+            .check {{
+                font-size: 80px;
+                color: #4CAF50;
+            }}
+            .message {{
+                font-size: 24px;
+                margin-top: 20px;
+                color: #333;
+            }}
+            .sub-id {{
+                margin-top: 10px;
+                font-size: 18px;
+                color: #777;
+            }}
+            .close-note {{
+                margin-top: 30px;
+                font-size: 14px;
+                color: #aaa;
+            }}
+        </style>
+        <script>
+            setTimeout(() => {{
+                window.close();
+            }}, 50000);
+        </script>
+    </head>
+    <body>
+        <div class="check">✔️</div>
+        <div class="message">¡You are subscribed!</div>
+        <div class="sub-id">Subscription ID: <strong>{subscription_id}</strong></div>
+        <div class="close-note">This window will close automatically.</div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
