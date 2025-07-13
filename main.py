@@ -372,7 +372,7 @@ def activate_plan(plan_id: str):
     get_response = requests.get(get_url, headers=headers)
 
     print('*************************************')
-    print("Status code:", response.status_code)
+    print("Status code:", get_response.status_code)
     print("Response JSON:", get_response.json())
     print('*************************************')
 
