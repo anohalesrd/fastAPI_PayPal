@@ -12,6 +12,30 @@ The frontend has two buttons:
    - Creates a real subscription in PayPal
 
 ---
+## Workflow
+
+    User->>Frontend: Clicks on PayPal button
+    Frontend->>Backend: POST /create-order
+    Backend->>PayPal: POST /v2/checkout/orders
+    PayPal-->>Backend: Returns orderID
+    Backend-->>Frontend: Sends orderID to client
+
+    User->>Frontend: Approves payment in PayPal popup
+    Frontend->>Backend: POST /capture-order/{orderID}
+    Backend->>PayPal: POST /v2/checkout/orders/{orderID}/capture
+    PayPal-->>Backend: Returns transaction details (ID, status)
+    Backend-->>Frontend: Sends JSON response (status + transaction_id)
+    Frontend->>Frontend: Displays confirmation modal
+
+    Note over Frontend: "Refund" button becomes visible after successful payment
+
+    User->>Frontend: Clicks on "Refund" button
+    Frontend->>Backend: POST /refund-transaction/{transaction_id}
+    Backend->>PayPal: POST /v2/payments/captures/{transaction_id}/refund
+    PayPal-->>Backend: Returns refund details (refund_id, status)
+    Backend-->>Frontend: Sends refund result to client
+    Frontend->>Frontend: Displays refund confirmation modal
+---
 
 ## 🚀 Requirements
 
